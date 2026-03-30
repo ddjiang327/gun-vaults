@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const C = {
   bg: "#F5F5F5", surface: "#FFFFFF", border: "#E8E8E8",
@@ -732,20 +732,110 @@ const WallScreen = () => {
             </div>
           </div>
         ))}
+
+        {/* Coming Soon Notice */}
+        <div style={{ marginTop: 8, marginBottom: 16, borderRadius: 12, border: "1px dashed " + C.border, padding: "20px 20px", textAlign: "center", background: C.surface }}>
+          <div style={{ fontSize: 18, marginBottom: 8 }}>🚧</div>
+          <div style={{ fontWeight: 700, fontSize: 13, color: C.text, marginBottom: 4 }}>More features coming soon</div>
+          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6 }}>Live community wall, post sharing, and reactions will be available in a future update.</div>
+        </div>
       </div>
     </div>
   );
 };
 
+// Restore Confirm Modal
+const RestoreConfirmModal = ({ onClose, onConfirm, summary }) => (
+  <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px" }}>
+    <div style={{ background: C.surface, borderRadius: 16, padding: "24px 22px", width: "100%", maxWidth: 360, boxShadow: "0 8px 40px rgba(0,0,0,0.2)" }}>
+      <div style={{ fontWeight: 700, fontSize: 16, color: C.text, fontFamily: "Georgia, serif", marginBottom: 8 }}>Restore Backup?</div>
+      <div style={{ fontSize: 13, color: C.sub, lineHeight: 1.6, marginBottom: 16 }}>
+        This will <span style={{ color: C.error, fontWeight: 700 }}>replace all current data</span> with the backup:
+      </div>
+      <div style={{ background: C.bg, borderRadius: 10, border: "1px solid " + C.border, padding: "12px 16px", marginBottom: 20 }}>
+        {summary.map(s => (
+          <div key={s.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: C.text, marginBottom: 4 }}>
+            <span style={{ color: C.sub }}>{s.label}</span>
+            <span style={{ fontWeight: 700 }}>{s.value}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        <button onClick={onClose} style={{ flex: 1, padding: "12px 0", border: "1px solid " + C.border, borderRadius: 10, background: C.surface, color: C.sub, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>Cancel</button>
+        <button onClick={onConfirm} style={{ flex: 1, padding: "12px 0", border: "none", borderRadius: 10, background: C.error, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>Restore</button>
+      </div>
+    </div>
+  </div>
+);
+
 // Profile Screen
-const ProfileScreen = ({ toast, firearms, activities }) => {
+const ProfileScreen = ({ toast, firearms, activities, ammo, setShowSetPin, pin, setIsLoggedIn, onRestore }) => {
+  const [pendingRestore, setPendingRestore] = useState(null);
+  const restoreInputRef = useState(() => typeof document !== 'undefined' ? document.createElement('input') : null)[0];
+
+  const handleDownloadBackup = () => {
+    const backup = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      firearms,
+      ammo,
+      activities,
+    };
+    const json = JSON.stringify(backup, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const date = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `gunvault-backup-${date}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast("Backup downloaded!");
+  };
+
+  const handleRestoreClick = () => {
+    if (!restoreInputRef) return;
+    restoreInputRef.type = 'file';
+    restoreInputRef.accept = '.json,application/json';
+    restoreInputRef.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          if (!data.firearms || !data.ammo || !data.activities) throw new Error("Invalid backup");
+          setPendingRestore({
+            data,
+            summary: [
+              { label: "Firearms", value: data.firearms.length },
+              { label: "Ammo entries", value: data.ammo.length },
+              { label: "Activities", value: data.activities.length },
+              { label: "Backup date", value: data.exportedAt ? new Date(data.exportedAt).toLocaleDateString() : "Unknown" },
+            ]
+          });
+        } catch {
+          toast("Invalid backup file");
+        }
+      };
+      reader.readAsText(file);
+      restoreInputRef.value = '';
+    };
+    restoreInputRef.click();
+  };
+
+  const handleConfirmRestore = () => {
+    onRestore(pendingRestore.data);
+    setPendingRestore(null);
+    toast("Backup restored successfully!");
+  };
+
   const settings = [
-    { label: "App Lock", desc: "Biometric enabled", msg: "App Lock settings" },
-    { label: "Cloud Sync", desc: "Synced just now", msg: "Cloud Sync settings" },
-    { label: "Notifications", desc: "On", msg: "Notification preferences" },
-    { label: "Privacy", desc: "", msg: "Privacy settings" },
-    { label: "Export Data", desc: "PDF / CSV", msg: "Exporting your data..." },
+    { label: "App Lock", desc: pin ? "PIN set" : "Not set", onClick: () => setShowSetPin(true) },
+    { label: "Privacy", desc: "", onClick: () => toast("Privacy settings") },
+    { label: "Export Data", desc: "PDF / CSV", onClick: () => toast("Exporting your data...") },
   ];
+
   return (
     <div style={{ flex: 1, overflowY: "auto", background: C.bg }}>
       <TopBar title="Profile" />
@@ -759,10 +849,38 @@ const ProfileScreen = ({ toast, firearms, activities }) => {
         </div>
         <StatRow items={[{ label: "Firearms", value: firearms.length }, { label: "Activities", value: activities.length }, { label: "Followers", value: 128 }]} />
       </div>
+
+      {/* Email Backup Card */}
+      <div style={{ background: C.surface, margin: "12px 16px 0", borderRadius: 12, border: "1px solid " + C.border, overflow: "hidden", boxShadow: C.shadow }}>
+        <div style={{ padding: "14px 18px 6px" }}>
+          <SectionLabel>Backup & Restore</SectionLabel>
+        </div>
+        <div style={{ padding: "4px 18px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.6 }}>
+            Send a backup of all your data to your email. If your data is ever lost, you can restore it from the backup file.
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={handleDownloadBackup}
+              style={{ flex: 1, padding: "11px 0", background: C.accent, border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+            >
+              ⬇️ Download Backup (.json)
+            </button>
+            <button
+              onClick={handleRestoreClick}
+              style={{ flex: 1, padding: "11px 0", background: C.surface, border: "1px solid " + C.border, borderRadius: 10, color: C.text, fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+            >
+              📂 Restore from File
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Other Settings */}
       <div style={{ background: C.surface, margin: "12px 16px 0", borderRadius: 12, border: "1px solid " + C.border, overflow: "hidden", boxShadow: C.shadow }}>
         {settings.map((item, i) => (
           <div key={item.label}>
-            <button onClick={() => toast(item.msg)} style={{ display: "flex", alignItems: "center", width: "100%", padding: "15px 18px", cursor: "pointer", background: "none", border: "none", textAlign: "left" }}>
+            <button onClick={item.onClick} style={{ display: "flex", alignItems: "center", width: "100%", padding: "15px 18px", cursor: "pointer", background: "none", border: "none", textAlign: "left" }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 600, color: C.text, fontSize: 14 }}>{item.label}</div>
                 {item.desc ? <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>{item.desc}</div> : null}
@@ -773,14 +891,71 @@ const ProfileScreen = ({ toast, firearms, activities }) => {
           </div>
         ))}
       </div>
+
       <div style={{ background: C.surface, margin: "12px 16px 0", borderRadius: 12, border: "1px solid " + C.border, overflow: "hidden", boxShadow: C.shadow }}>
-        <button onClick={() => toast("Signing out...")} style={{ display: "flex", alignItems: "center", width: "100%", padding: "15px 18px", cursor: "pointer", background: "none", border: "none", textAlign: "left" }}>
+        <button onClick={() => { setIsLoggedIn(false); toast("Signed out"); }} style={{ display: "flex", alignItems: "center", width: "100%", padding: "15px 18px", cursor: "pointer", background: "none", border: "none", textAlign: "left" }}>
           <div style={{ flex: 1 }}><div style={{ fontWeight: 600, color: C.sub, fontSize: 14 }}>Sign Out</div></div>
           <span style={{ color: C.muted, fontSize: 16 }}>{">"}</span>
         </button>
       </div>
       <div style={{ height: 28 }} />
+
+      {pendingRestore && (
+        <RestoreConfirmModal
+          summary={pendingRestore.summary}
+          onClose={() => setPendingRestore(null)}
+          onConfirm={handleConfirmRestore}
+        />
+      )}
     </div>
+  );
+};
+
+const LoginScreen = ({ onLogin, pin }) => {
+  const [input, setInput] = useState('');
+  const [error, setError] = useState(false);
+  const handleSubmit = () => {
+    if (input === pin) {
+      onLogin();
+      setInput('');
+      setError(false);
+    } else {
+      setError(true);
+    }
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: C.bg, justifyContent: "center", alignItems: "center", padding: "0 20px" }}>
+      <div style={{ textAlign: "center", marginBottom: 40 }}>
+        <div style={{ fontSize: 24, fontWeight: 700, color: C.text, fontFamily: "Georgia, serif" }}>Gun Vault</div>
+        <div style={{ fontSize: 14, color: C.sub, marginTop: 8 }}>Enter your PIN to unlock</div>
+      </div>
+      <input type="password" value={input} onChange={e => { setInput(e.target.value); setError(false); }} placeholder="PIN" style={{ width: "100%", maxWidth: 300, padding: "14px 16px", fontSize: 16, border: "1px solid " + (error ? C.error : C.border), borderRadius: 10, background: C.surface, color: C.text, outline: "none", textAlign: "center", fontFamily: "monospace" }} onKeyPress={e => e.key === 'Enter' && handleSubmit()} />
+      {error && <div style={{ fontSize: 12, color: C.error, marginTop: 8 }}>Incorrect PIN</div>}
+      <button onClick={handleSubmit} style={{ marginTop: 20, background: C.accent, border: "none", borderRadius: 10, color: "#fff", fontSize: 16, fontWeight: 700, padding: "14px 40px", cursor: "pointer" }}>Unlock</button>
+    </div>
+  );
+};
+
+const SetPinModal = ({ onClose, onSave, currentPin }) => {
+  const [pin, setPin] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const handleSave = () => {
+    if (pin.length < 4) { setError('PIN must be at least 4 digits'); return; }
+    if (pin !== confirm) { setError('PINs do not match'); return; }
+    onSave(pin);
+    setError('');
+  };
+  return (
+    <ModalShell title="Set App Lock PIN" onClose={onClose} onSave={handleSave}>
+      <FormField label="New PIN">
+        <input type="password" value={pin} onChange={e => { setPin(e.target.value); setError(''); }} placeholder="Enter new PIN" style={{ width: "100%", padding: "11px 14px", fontSize: 14, border: "1px solid " + C.border, borderRadius: 8, background: C.surface, color: C.text, outline: "none", boxSizing: "border-box", fontFamily: "monospace" }} />
+      </FormField>
+      <FormField label="Confirm PIN">
+        <input type="password" value={confirm} onChange={e => { setConfirm(e.target.value); setError(''); }} placeholder="Confirm new PIN" style={{ width: "100%", padding: "11px 14px", fontSize: 14, border: "1px solid " + C.border, borderRadius: 8, background: C.surface, color: C.text, outline: "none", boxSizing: "border-box", fontFamily: "monospace" }} />
+      </FormField>
+      {error && <div style={{ fontSize: 11, color: C.error, marginTop: 8 }}>{error}</div>}
+    </ModalShell>
   );
 };
 
@@ -800,11 +975,41 @@ export default function App() {
   const [showAddAmmo, setShowAddAmmo] = useState(false);
   const [showLogActivity, setShowLogActivity] = useState(false);
   const [showLogCleaning, setShowLogCleaning] = useState(false);
-  const [firearms, setFirearms] = useState(INIT_FIREARMS);
-  const [ammo, setAmmo] = useState(INIT_AMMO);
-  const [activities, setActivities] = useState(INIT_ACTIVITIES);
+  const [firearms, setFirearms] = useState(() => {
+    const saved = localStorage.getItem('firearms');
+    return saved ? JSON.parse(saved) : INIT_FIREARMS;
+  });
+  const [ammo, setAmmo] = useState(() => {
+    const saved = localStorage.getItem('ammo');
+    return saved ? JSON.parse(saved) : INIT_AMMO;
+  });
+  const [activities, setActivities] = useState(() => {
+    const saved = localStorage.getItem('activities');
+    return saved ? JSON.parse(saved) : INIT_ACTIVITIES;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('firearms', JSON.stringify(firearms));
+  }, [firearms]);
+
+  useEffect(() => {
+    localStorage.setItem('ammo', JSON.stringify(ammo));
+  }, [ammo]);
+
+  useEffect(() => {
+    localStorage.setItem('activities', JSON.stringify(activities));
+  }, [activities]);
+  const [pin, setPin] = useState(localStorage.getItem('pin') || null);
+  const [isLoggedIn, setIsLoggedIn] = useState(!pin);
+  const [showSetPin, setShowSetPin] = useState(false);
 
   const toast = msg => setToastMsg(msg);
+
+  const handleRestore = (data) => {
+    setFirearms(data.firearms);
+    setAmmo(data.ammo);
+    setActivities(data.activities);
+  };
 
   const handleSaveFirearm = f => { setFirearms(fs => [{ ...f, id: Date.now() }, ...fs]); setShowAddFirearm(false); toast(f.make + " " + f.model + " added!"); };
   const handleSaveAmmo = a => { setAmmo(prev => [{ ...a, id: Date.now() }, ...prev]); setShowAddAmmo(false); toast(a.brand + " " + a.caliber + " added - " + a.qty + " rounds"); };
@@ -824,28 +1029,35 @@ export default function App() {
     if (tab === "ammo") return <AmmoScreen ammo={ammo} onAdd={() => setShowAddAmmo(true)} />;
     if (tab === "activities") return <ActivitiesScreen activities={activities} onAdd={() => setShowLogActivity(true)} />;
     if (tab === "wall") return <WallScreen />;
-    if (tab === "profile") return <ProfileScreen toast={toast} firearms={firearms} activities={activities} />;
+    if (tab === "profile") return <ProfileScreen toast={toast} firearms={firearms} activities={activities} ammo={ammo} setShowSetPin={setShowSetPin} pin={pin} setIsLoggedIn={setIsLoggedIn} onRestore={handleRestore} />;
   };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: C.bg, fontFamily: "Helvetica Neue, Helvetica, sans-serif", maxWidth: 430, margin: "0 auto", boxShadow: "0 0 40px rgba(0,0,0,0.08)", position: "relative", overflow: "hidden" }}>
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>{renderScreen()}</div>
-      <div style={{ display: "flex", background: C.surface, borderTop: "1px solid " + C.border, padding: "8px 0 12px", zIndex: 30 }}>
-        {TABS.map(t => {
-          const active = tab === t.id;
-          return (
-            <button key={t.id} onClick={() => { setTab(t.id); setSelected(null); }} style={{ flex: 1, background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: "pointer", padding: "4px 0" }}>
-              <div style={{ width: 4, height: 4, borderRadius: "50%", background: active ? C.accent : "transparent" }} />
-              <span style={{ fontSize: 10, fontWeight: active ? 700 : 500, color: active ? C.text : C.muted, textTransform: "uppercase", letterSpacing: 0.8 }}>{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
-      {showAddFirearm && <AddFirearmModal onClose={() => setShowAddFirearm(false)} onSave={handleSaveFirearm} />}
-      {showAddAmmo && <AddAmmoModal onClose={() => setShowAddAmmo(false)} onSave={handleSaveAmmo} />}
-      {showLogActivity && <LogActivityModal onClose={() => setShowLogActivity(false)} onSave={handleSaveActivity} firearms={firearms} ammo={ammo} />}
-      {showLogCleaning && <LogCleaningModal onClose={() => setShowLogCleaning(false)} onSave={handleSaveCleaning} firearms={firearms} />}
-      {toastMsg && <Toast message={toastMsg} onDone={() => setToastMsg(null)} />}
+      {!isLoggedIn ? (
+        <LoginScreen onLogin={() => setIsLoggedIn(true)} pin={pin} />
+      ) : (
+        <>
+          <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>{renderScreen()}</div>
+          <div style={{ display: "flex", background: C.surface, borderTop: "1px solid " + C.border, padding: "8px 0 12px", zIndex: 30 }}>
+            {TABS.map(t => {
+              const active = tab === t.id;
+              return (
+                <button key={t.id} onClick={() => { setTab(t.id); setSelected(null); }} style={{ flex: 1, background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: "pointer", padding: "4px 0" }}>
+                  <div style={{ width: 4, height: 4, borderRadius: "50%", background: active ? C.accent : "transparent" }} />
+                  <span style={{ fontSize: 10, fontWeight: active ? 700 : 500, color: active ? C.text : C.muted, textTransform: "uppercase", letterSpacing: 0.8 }}>{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {showAddFirearm && <AddFirearmModal onClose={() => setShowAddFirearm(false)} onSave={handleSaveFirearm} />}
+          {showAddAmmo && <AddAmmoModal onClose={() => setShowAddAmmo(false)} onSave={handleSaveAmmo} />}
+          {showLogActivity && <LogActivityModal onClose={() => setShowLogActivity(false)} onSave={handleSaveActivity} firearms={firearms} ammo={ammo} />}
+          {showLogCleaning && <LogCleaningModal onClose={() => setShowLogCleaning(false)} onSave={handleSaveCleaning} firearms={firearms} />}
+          {showSetPin && <SetPinModal onClose={() => setShowSetPin(false)} onSave={(p) => { localStorage.setItem('pin', p); setPin(p); setShowSetPin(false); toast("PIN set successfully"); }} currentPin={pin} />}
+          {toastMsg && <Toast message={toastMsg} onDone={() => setToastMsg(null)} />}
+        </>
+      )}
     </div>
   );
 }
