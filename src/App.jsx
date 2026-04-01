@@ -1039,7 +1039,7 @@ export default function App() {
       ) : (
         <>
           <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>{renderScreen()}</div>
-          <div style={{ display: "flex", background: C.surface, borderTop: "1px solid " + C.border, padding: "8px 0 12px", zIndex: 30 }}>
+          <div style={{ display: "flex", background: C.surface, borderTop: "1px solid " + C.border, padding: "12px 0 24px", zIndex: 30 }}>
             {TABS.map(t => {
               const active = tab === t.id;
               return (
